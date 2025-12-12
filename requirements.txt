@@ -1,0 +1,7 @@
+streamlit
+feedparser
+sentence-transformers
+transformers
+torch
+sentencepiece
+urllib3
