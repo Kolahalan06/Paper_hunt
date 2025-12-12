@@ -17,8 +17,8 @@ Tech Stack
 - Python
 - Streamlit UI
 - arXiv API (atom feed) 
-- Sentence transformers** (semantic embeddings)
-- Hugging face ransformer (optional summarisation)
+- Sentence transformers (semantic embeddings)
+- Hugging face ransformer 
 - Feedparser
   
  Run Locally
