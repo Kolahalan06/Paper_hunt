@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 import urllib.parse
 import re
 
-# ── Optional heavy deps ──────────────────────────────────────────────────────
 try:
     from sentence_transformers import SentenceTransformer, util
     EMBEDDING_AVAILABLE = True
@@ -16,15 +15,12 @@ try:
     SUMMARIZER_AVAILABLE = True
 except Exception:
     SUMMARIZER_AVAILABLE = False
-
-# ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="PaperHunt – arXiv Semantic Search",
     page_icon="🔬",
     layout="wide",
 )
 
-# ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Serif+Display&display=swap');
@@ -72,7 +68,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ── Model loaders (cached) ────────────────────────────────────────────────────
 @st.cache_resource(show_spinner=False)
 def load_embedding_model():
     if not EMBEDDING_AVAILABLE:
@@ -91,8 +86,6 @@ def load_summarizer_model():
             continue
     return None
 
-
-# ── arXiv fetch (cached per query, 1-hour TTL) ────────────────────────────────
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_papers(search_query_str: str, max_results: int, days_back: int):
     encoded = urllib.parse.quote(search_query_str)
@@ -105,7 +98,6 @@ def fetch_papers(search_query_str: str, max_results: int, days_back: int):
     date_limit = datetime.now() - timedelta(days=days_back)
     papers = []
     for entry in feed.entries:
-        # parse date
         pub = None
         for fmt in ('%Y-%m-%dT%H:%M:%SZ',):
             for field in ('published', 'updated'):
@@ -134,8 +126,6 @@ def fetch_papers(search_query_str: str, max_results: int, days_back: int):
         })
     return papers
 
-
-# ── Sidebar ───────────────────────────────────────────────────────────────────
 DOMAINS = [
     "All", "Healthcare", "Defense", "Finance", "Education", "Robotics",
     "Energy", "Transportation", "Agriculture", "Space", "Climate Science",
@@ -147,10 +137,12 @@ st.sidebar.title("🔬 PaperHunt")
 st.sidebar.markdown("*Semantic arXiv explorer*")
 st.sidebar.markdown("---")
 
-search_term     = st.sidebar.text_input("AI Technique", placeholder="e.g. deep learning, ViT, RAG")
+search_term     = st.sidebar.text_input("AI Technique", placeholder="e.g. deep learning, ViT, RAG").upper()
 selected_domain = st.sidebar.selectbox("Application Domain", DOMAINS)
 max_results     = st.sidebar.number_input("Papers to fetch from arXiv", 1, 100, 30)
-display_count   = st.sidebar.number_input("Top results to display", 1, max_results, min(10, max_results))
+if max_results < 10:
+    st.sidebar.warning("⚠️ Try at least 10 for better results.")
+display_count   = st.sidebar.number_input("Top results to display", 1, int(max_results), min(10, int(max_results)))
 days_back       = st.sidebar.slider("Published within (days)", 1, 3650, 365)
 use_semantic    = st.sidebar.checkbox("Semantic ranking", value=True, disabled=not EMBEDDING_AVAILABLE)
 use_summarizer  = st.sidebar.checkbox("AI summaries", value=False, disabled=not SUMMARIZER_AVAILABLE)
@@ -161,8 +153,6 @@ st.sidebar.write(f"{'✅' if EMBEDDING_AVAILABLE else '❌'} Embeddings (MiniLM)
 st.sidebar.write(f"{'✅' if SUMMARIZER_AVAILABLE else '❌'} Summarizer (DistilBART)")
 
 search_btn = st.sidebar.button("🔍 Search", use_container_width=True, type="primary")
-
-# ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("## 🔬 PaperHunt")
 st.markdown("Find arXiv papers by AI technique × application domain, ranked by semantic similarity.")
 
@@ -175,19 +165,33 @@ if not search_term.strip():
     st.stop()
 
 tech = search_term.strip()
-search_query_str = f'all:"{tech}"' if selected_domain == "All" else f'all:"{tech}" AND all:"{selected_domain}"'
+# Use loose keyword search (no quotes) so arXiv matches naturally.
+# Quoted exact-match kills results for short terms like "ml" or "cv".
+if selected_domain == "All":
+    search_query_str = f"all:{tech}"
+else:
+    search_query_str = f"all:{tech} AND all:{selected_domain.lower().replace(' ', '_')}"
 
-# ── Fetch ─────────────────────────────────────────────────────────────────────
+with st.expander("🛠 Debug — arXiv query being sent", expanded=False):
+    st.code(search_query_str)
+
 with st.spinner(f"Fetching papers from arXiv for **{tech}**…"):
-    papers = fetch_papers(search_query_str, max_results, days_back)
+    papers = fetch_papers(search_query_str, int(max_results), days_back)
 
 if not papers:
     st.error("No papers found. Try increasing *days back* or *max results*, or broaden your search terms.")
+    with st.expander("💡 Tips to fix this"):
+        st.markdown("""
+- Use full words: `machine learning` not `ml`, `computer vision` not `cv`
+- Try selecting **All** as domain first
+- Increase **Papers to fetch** to at least 20
+- Increase **Published within** to 1000+ days
+        """)
     st.stop()
 
 st.caption(f"Fetched **{len(papers)}** papers matching the query.")
 
-# ── Semantic ranking ──────────────────────────────────────────────────────────
+# ── Semantic ranking 
 if use_semantic and EMBEDDING_AVAILABLE:
     with st.spinner("Computing semantic similarity…"):
         model = load_embedding_model()
@@ -204,7 +208,7 @@ if use_semantic and EMBEDDING_AVAILABLE:
 
     papers = sorted(papers, key=lambda x: x["score"], reverse=True)
 
-# ── Summarizer ────────────────────────────────────────────────────────────────
+# ── Summarizer 
 summarizer = None
 if use_summarizer and SUMMARIZER_AVAILABLE:
     with st.spinner("Loading summarizer model (one-time, may take a minute)…"):
@@ -212,7 +216,7 @@ if use_summarizer and SUMMARIZER_AVAILABLE:
     if summarizer is None:
         st.warning("Summarizer could not be loaded — showing abstracts instead.")
 
-# ── Results ───────────────────────────────────────────────────────────────────
+# ── Results
 st.markdown("---")
 st.markdown(f"### Top {min(display_count, len(papers))} results")
 
@@ -222,7 +226,7 @@ for i, paper in enumerate(papers[:display_count]):
         if paper["score"] is not None else ""
     )
 
-    # GitHub repos in abstract
+    # GitHub repos 
     github_links = re.findall(
         r"(https?://github\.com[^\s\)\]\.,<>]+)",
         paper["abstract"],
@@ -230,16 +234,15 @@ for i, paper in enumerate(papers[:display_count]):
     )
 
     with st.container():
-        st.markdown(f"""
-        <div class="paper-card">
-            <a class="paper-title" href="{paper['link']}" target="_blank">{i+1}. {paper['title']}</a>
-            {score_html}
-            <div class="meta-line">
-                📅 {paper['published'].strftime('%Y-%m-%d')} &nbsp;|&nbsp;
-                ✍️ {paper['authors'][:120]}{'…' if len(paper['authors']) > 120 else ''}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="paper-card">'
+            f'<a class="paper-title" href="{paper["link"]}" target="_blank">{i+1}. {paper["title"]}</a>'
+            f'{score_html}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        authors_short = paper['authors'][:120] + ('…' if len(paper['authors']) > 120 else '')
+        st.caption(f"📅 {paper['published'].strftime('%Y-%m-%d')}  |  ✍️ {authors_short}")
 
         col1, col2 = st.columns([1, 5])
         with col1:
