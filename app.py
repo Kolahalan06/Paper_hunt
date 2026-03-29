@@ -13,7 +13,6 @@ def clean_text(text):
     text = text.lower()
     text = re.sub(r'[^a-z0-9\s]', ' ', text)  # remove symbols
     return text
-# ── Optional heavy deps ───────────────────────────────────────────────────────
 try:
     from sentence_transformers import SentenceTransformer, util
     import numpy as np
@@ -27,16 +26,12 @@ try:
 except Exception:
     SUMMARIZER_AVAILABLE = False
 
-# ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="PaperHunt",
     page_icon="🔬",
     layout="wide",
 )
 
-
-
-# ── CSS ───────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Serif+Display&display=swap');
@@ -103,7 +98,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ── Model loaders ─────────────────────────────────────────────────────────────
+# Model loaders 
 @st.cache_resource(show_spinner=False)
 def load_embedding_model():
     if not EMBEDDING_AVAILABLE:
@@ -123,7 +118,7 @@ def load_summarizer_model():
     return None
 
 
-# ── arXiv fetcher ─────────────────────────────────────────────────────────────
+# arXiv fetch 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_arxiv(tech: str, domain: str, max_results: int, days_back: int):
     q = f"all:{tech}" if domain == "All" else f"all:{tech} AND all:{domain.lower().replace(' ', '_')}"
@@ -147,7 +142,6 @@ def fetch_arxiv(tech: str, domain: str, max_results: int, days_back: int):
         if pub is None or pub < date_limit:
             continue
         authors = ", ".join(a.name for a in getattr(entry, "authors", [])) or "Unknown"
-        # extract arXiv ID for BibTeX key
         arxiv_id = re.search(r"\d{4}\.\d+", entry.link)
         arxiv_id = arxiv_id.group() if arxiv_id else entry.link.split("/")[-1]
         papers.append({
@@ -166,8 +160,6 @@ def fetch_arxiv(tech: str, domain: str, max_results: int, days_back: int):
         })
     return papers
 
-
-# ── Semantic Scholar fetcher ──────────────────────────────────────────────────
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_semantic_scholar(tech: str, domain: str, max_results: int, days_back: int):
     query  = tech if domain == "All" else f"{tech} {domain}"
@@ -223,8 +215,6 @@ def fetch_semantic_scholar(tech: str, domain: str, max_results: int, days_back: 
         })
     return papers
 
-
-# ── PubMed fetcher ────────────────────────────────────────────────────────────
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_pubmed(tech: str, domain: str, max_results: int, days_back: int):
     query = tech if domain == "All" else f"{tech} {domain}"
@@ -249,7 +239,6 @@ def fetch_pubmed(tech: str, domain: str, max_results: int, days_back: int):
     if not ids:
         return []
 
-    # Step 2 — fetch details for those IDs
     fetch_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
     fetch_params = {
         "db":      "pubmed",
@@ -264,21 +253,16 @@ def fetch_pubmed(tech: str, domain: str, max_results: int, days_back: int):
     except Exception:
         return []
 
-    # Parse XML with regex (no lxml needed)
     articles = re.findall(r"<PubmedArticle>(.*?)</PubmedArticle>", xml, re.DOTALL)
     papers = []
     for article in articles:
-        # Title
         title_m = re.search(r"<ArticleTitle>(.*?)</ArticleTitle>", article, re.DOTALL)
         title   = re.sub(r"<[^>]+>", "", title_m.group(1)).strip() if title_m else ""
         if not title:
             continue
 
-        # Abstract
         abstract_m = re.search(r"<AbstractText.*?>(.*?)</AbstractText>", article, re.DOTALL)
         abstract   = re.sub(r"<[^>]+>", "", abstract_m.group(1)).strip() if abstract_m else ""
-
-        # Authors
         author_blocks = re.findall(r"<Author[^>]*>(.*?)</Author>", article, re.DOTALL)
         author_names  = []
         for block in author_blocks:
@@ -291,7 +275,6 @@ def fetch_pubmed(tech: str, domain: str, max_results: int, days_back: int):
                 author_names.append(name)
         authors = ", ".join(author_names) or "Unknown"
 
-        # PMID
         pmid_m = re.search(r"<PMID[^>]*>(\d+)</PMID>", article)
         pmid   = pmid_m.group(1) if pmid_m else ""
 
@@ -299,11 +282,8 @@ def fetch_pubmed(tech: str, domain: str, max_results: int, days_back: int):
         doi_m = re.search(r'<ArticleId IdType="doi">(.*?)</ArticleId>', article)
         doi   = doi_m.group(1).strip() if doi_m else None
 
-        # Journal
         journal_m = re.search(r"<Title>(.*?)</Title>", article)
         journal   = journal_m.group(1).strip() if journal_m else "PubMed"
-
-        # Date
         year_m  = re.search(r"<PubDate>.*?<Year>(\d{4})</Year>",  article, re.DOTALL)
         month_m = re.search(r"<PubDate>.*?<Month>(\w+)</Month>", article, re.DOTALL)
         year    = int(year_m.group(1)) if year_m else 2000
@@ -349,10 +329,7 @@ def get_match_keywords(user_text, paper_text, top_k=5):
     paper_words = extract_keywords(paper_text)
 
     common = user_words.intersection(paper_words)
-
-    # prioritize longer / more meaningful words
     common = sorted(common, key=lambda x: -len(x))
-
     return list(common)[:top_k]
 
 def generate_explanation(match_words):
@@ -364,15 +341,12 @@ def generate_explanation(match_words):
         + ", ".join(match_words[:3])
         + ", indicating a similar approach or problem domain."
     )
-
-# ── Export helpers ────────────────────────────────────────────────────────────
 def _bibtex_key(paper: dict, idx: int) -> str:
     """Generate a citekey like Smith2023 or arxiv2024_01"""
     first_author = paper["authors"].split(",")[0].split()[-1] if paper["authors"] != "Unknown" else "Unknown"
     first_author = re.sub(r"[^A-Za-z]", "", first_author)
     year = paper["published"].year
     return f"{first_author}{year}_{idx}"
-
 
 def papers_to_bibtex(papers: list) -> str:
     lines = []
@@ -449,8 +423,6 @@ def render_export_bar(papers: list, label: str = "results"):
         )
     st.markdown('</div>', unsafe_allow_html=True)
 
-
-# ── Sidebar ───────────────────────────────────────────────────────────────────
 DOMAINS = [
     "All", "Healthcare", "Defense", "Finance", "Education", "Robotics",
     "Energy", "Transportation", "Agriculture", "Space", "Climate Science",
@@ -489,8 +461,6 @@ st.sidebar.write(f"{'✅' if EMBEDDING_AVAILABLE else '❌'} Embeddings (MiniLM)
 st.sidebar.write(f"{'✅' if SUMMARIZER_AVAILABLE else '❌'} Summarizer (DistilBART)")
 
 search_btn = st.sidebar.button("🔍 Search / Analyse", use_container_width=True, type="primary")
-
-# ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("## 🔬 PaperHunt")
 st.markdown("Search **arXiv · Semantic Scholar · PubMed** — ranked by semantic similarity.")
 
@@ -503,8 +473,6 @@ if not search_term.strip():
     st.stop()
 
 tech = search_term.strip()
-
-# ── Fetch from selected sources ───────────────────────────────────────────────
 all_papers = []
 
 if use_arxiv:
@@ -535,8 +503,6 @@ if not all_papers:
 - Enable more sources in the sidebar
         """)
     st.stop()
-
-# ── Deduplicate by title ──────────────────────────────────────────────────────
 seen, deduped = set(), []
 for p in all_papers:
     key = re.sub(r'\s+', ' ', p["title"].lower().strip())
@@ -545,17 +511,11 @@ for p in all_papers:
         deduped.append(p)
 all_papers = deduped
 st.caption(f"**{len(all_papers)} unique papers** after deduplication.")
-
-# ── Load embedding model once ─────────────────────────────────────────────────
 emb_model = None
 if EMBEDDING_AVAILABLE and (use_semantic or mode == "🧪 Novelty Checker"):
     with st.spinner("Loading embedding model…"):
         emb_model = load_embedding_model()
 
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  MODE A — PAPER SEARCH
-# ══════════════════════════════════════════════════════════════════════════════
 if mode == "🔍 Paper Search":
 
     if use_semantic and emb_model:
@@ -575,8 +535,6 @@ if mode == "🔍 Paper Search":
             summarizer = load_summarizer_model()
 
     st.markdown("---")
-
-    # ── Export bar ────────────────────────────────────────────────────────────
     display_papers = all_papers[:int(display_count)]
     render_export_bar(display_papers, label="displayed papers")
 
@@ -645,9 +603,6 @@ if mode == "🔍 Paper Search":
     st.success(f"✅ Showing {len(display_papers)} of {len(all_papers)} papers.")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  MODE B — NOVELTY CHECKER
-# ══════════════════════════════════════════════════════════════════════════════
 else:
     st.markdown("---")
     st.markdown("### 🧪 Novelty Checker")
@@ -677,10 +632,8 @@ else:
     ranked   = sorted(all_papers, key=lambda x: x["score"], reverse=True)
     top5     = ranked[:5]
 
-    # ── Export top 5 matches ──────────────────────────────────────────────────
     render_export_bar(top5, label="closest matching papers")
 
-    # ── Top 5 most similar ────────────────────────────────────────────────────
     st.markdown("#### 📄 Most similar existing papers")
     st.caption("Papers your idea overlaps with the most — read these before writing your proposal.")
 
@@ -690,7 +643,6 @@ else:
         overlap_pct = round(paper["score"] * 100, 1)
         src_cls     = src_map.get(paper["source"], "source-ss")
 
-    # 👉 CARD
     st.markdown(
         f'<div class="paper-card">'
         f'<a class="paper-title" href="{paper["link"]}" target="_blank">{i+1}. {paper["title"]}</a>'
@@ -704,9 +656,6 @@ else:
     authors_short = paper["authors"][:100] + ("…" if len(paper["authors"]) > 100 else "")
     st.caption(f"📅 {paper['published'].strftime('%Y')}  |  ✍️ {authors_short}")
 
-    # =========================
-    # 🔥 EXPLAINABILITY (FIXED POSITION)
-    # =========================
     paper_text = (paper.get("title", "") + " " + paper.get("abstract", "")).strip()
     match_words = get_match_keywords(user_idea, paper_text)
 
@@ -716,20 +665,13 @@ else:
         st.markdown(f"🧠 **Matches:** {', '.join(match_words)}")
         explanation = generate_explanation(match_words)
         st.markdown(f"💡 *{explanation}*")
-    # =========================
-
-    # 👉 DOI
     if paper.get("doi"):
         st.markdown(f"[🔗 DOI](https://doi.org/{paper['doi']})")
 
-    # 👉 ABSTRACT
+
     with st.expander("Abstract"):
         st.write(paper["abstract"])
 
-
-        # =========================
-        # 🔥 KEYWORD MATCHING
-        # =========================
         paper_text = (paper.get("title", "") + " " + paper.get("abstract", "")).strip()
         match_words = get_match_keywords(user_idea, paper_text)
         if match_words:
@@ -741,8 +683,6 @@ else:
 
         with st.expander("Abstract"):
             st.write(paper["abstract"])
-
-    # ── Research gaps ─────────────────────────────────────────────────────────
     st.markdown("---")
     st.markdown("#### 🌱 Related but less explored directions")
     st.caption("Lower overlap with your idea — potential research gaps worth exploring.")
